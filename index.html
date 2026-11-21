@@ -11,8 +11,19 @@
 <section class="learn" id="learning" aria-label="Суралцах"><div><div class="title-row"><h2>Өнөөдрийн нэр томьёо</h2><button id="random">⚄ Санамсаргүй үг</button></div><div id="daily"></div></div><div><div class="title-row"><h2>Өөрийгөө шалгах</h2><button id="next-quiz">Дараагийн карт</button></div><span id="progress" class="meta"></span><progress id="study-progress" aria-label="Суралцах явц"></progress><div id="quiz"></div></div></section><section id="dictionary"><h2 id="heading">Нэр томьёо</h2><div class="controls"><input id="search" type="search" aria-label="Нэр томьёо хайх" placeholder="Жишээ нь: drawbell, тулгуурын хүчдэл"><select id="sort" aria-label="Эрэмбэлэх"><option value="en">Англи A–Z</option><option value="mn">Монгол А–Я</option></select><button id="reset">Цэвэрлэх</button></div><div id="letters" class="letters" aria-label="Эхний үсгээр шүүх"></div><p id="status" role="status"></p><div id="results"></div><div class="pager" id="pager"><button id="prev">Өмнөх</button><span id="position"></span><button id="next">Дараах</button></div></section></main>
 <dialog id="admin-dialog"><div class="admin-heading"><h2>Glossary админ</h2><button type="button" id="admin-close">Хаах</button></div>
 <p id="admin-status" role="status"></p>
-<form id="admin-login" hidden><label for="admin-email">Админы мэйл</label><input type="email" id="admin-email" autocomplete="email" required><button type="submit">Нэвтрэх холбоос авах</button></form>
+<form id="admin-login" hidden>
+<label for="admin-email">Админы мэйл</label><input type="email" id="admin-email" autocomplete="username" required>
+<label for="admin-password">Нууц үг</label><input type="password" id="admin-password" autocomplete="current-password">
+<button type="submit">Нэвтрэх</button>
+<button type="button" id="admin-email-link">Мэйлээр холбоос авах</button>
+</form>
 <div id="admin-editor" hidden><div class="admin-heading"><button type="button" id="admin-new">Шинэ нэр томьёо</button><button type="button" id="admin-logout">Гарах</button></div>
+<details><summary>Нууц үг тохируулах</summary>
+<form id="admin-password-form">
+<label for="admin-new-password">Шинэ нууц үг</label>
+<input type="password" id="admin-new-password" autocomplete="new-password" minlength="12" required>
+<button type="submit">Нууц үгийг хадгалах</button>
+</form></details>
 <form id="admin-form">
 <label>Англи нэр<input name="english" required maxlength="250"></label>
 <label>Монгол нэр<input name="mongolian" maxlength="250"></label>
@@ -252,14 +263,54 @@ if(database){
   database.auth.onAuthStateChange((_event,session)=>setTimeout(()=>applySession(session),0));
   login.onsubmit=async event=>{
     event.preventDefault();
-    const button=login.querySelector('button');
+    const password=el('admin-password');
+    if(!password.value){adminStatus.textContent='Нууц үгээ оруулна уу.';password.focus();return;}
+    const button=login.querySelector('button[type="submit"]');
     button.disabled=true;
     try{
-      const redirect=new URL(location.pathname,location.origin).href;
-      const {error}=await database.auth.signInWithOtp({email:el('admin-email').value.trim(),options:{shouldCreateUser:false,emailRedirectTo:redirect}});
-      adminStatus.textContent=error?'Холбоос илгээж чадсангүй. Админы мэйл болон илгээх тохиргоогоо шалгана уу.':'Ирсэн мэйл дэх нэвтрэх холбоосыг нээнэ үү.';
+      const {data,error}=await database.auth.signInWithPassword({email:el('admin-email').value.trim(),password:password.value});
+      if(error){
+        adminStatus.textContent=error.status===429?'Олон оролдлого хийсэн байна. Түр хүлээгээд дахин оролдоно уу.':'Мэйл эсвэл нууц үгээ шалгана уу.';
+      }else{
+        password.value='';
+        await applySession(data.session);
+        if(isAdmin)adminStatus.textContent='Админаар нэвтэрлээ.';
+      }
     }catch{adminStatus.textContent='Нэвтрэх хүсэлт амжилтгүй боллоо.';}
     finally{button.disabled=false;}
+  };
+  el('admin-email-link').onclick=async ()=>{
+    const email=el('admin-email');
+    if(!email.reportValidity())return;
+    const button=el('admin-email-link');
+    button.disabled=true;
+    try{
+      const redirect='https://buyankhishig-pixel.github.io/Block_cave/index.html';
+      const {error}=await database.auth.signInWithOtp({email:el('admin-email').value.trim(),options:{shouldCreateUser:false,emailRedirectTo:redirect}});
+      if (!error) {
+        adminStatus.textContent='Ирсэн мэйл дэх хамгийн шинэ нэвтрэх холбоосыг нээнэ үү.';
+      } else if(error.status===429 || error.code?.startsWith('over_')) {
+        adminStatus.textContent='Түр хязгаарлалт үйлчилж байна. Хэсэг хүлээгээд нэг удаа дахин оролдоно уу. ('+(error.code||'HTTP 429')+')';
+      } else {
+        adminStatus.textContent='Холбоос илгээж чадсангүй. Supabase: '+(error.code||error.status||error.message||'Тодорхойгүй алдаа')+'.';
+      }
+    }catch{adminStatus.textContent='Нэвтрэх хүсэлт амжилтгүй боллоо.';}
+    finally{button.disabled=false;}
+  };
+  el('admin-password-form').onsubmit=async event=>{
+    event.preventDefault();
+    if(!isAdmin)return;
+    const form=event.currentTarget, button=form.querySelector('button');
+    const password=el('admin-new-password');
+    button.disabled=true;
+    try{
+      const {error}=await database.auth.updateUser({password:password.value});
+      if(error)throw error;
+      form.reset();
+      adminStatus.textContent='Нууц үг хадгалагдлаа. Дараагийн удаа мэйл + нууц үгээр нэвтэрнэ.';
+    }catch(error){
+      adminStatus.textContent='Нууц үг хадгалагдсангүй. '+(error.code||'Дахин нэвтэрч оролдоно уу.');
+    }finally{button.disabled=false;}
   };
   el('admin-logout').onclick=async ()=>{
     const {error}=await database.auth.signOut();
